@@ -41,6 +41,7 @@ import com.naver.maps.map.UiSettings;
 import com.naver.maps.map.overlay.Marker;
 import com.naver.maps.map.overlay.PolylineOverlay;
 import com.naver.maps.map.util.FusedLocationSource;
+import com.naver.maps.map.util.MarkerIcons;
 import com.o3dr.android.client.ControlTower;
 import com.o3dr.android.client.Drone;
 import com.o3dr.android.client.apis.ControlApi;
@@ -79,11 +80,14 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
     private ArrayList<LatLng> mLocationCollection = new ArrayList<LatLng>();
     private ArrayList<String> mTextInRecycleerView = new ArrayList<>();
     private Boolean mCameraFix = false;
+    private Boolean goal = false;
     private ControlTower controlTower;
     private Drone drone;
     private FusedLocationSource mLocationSource;
+    private LatLng mtargetposition;
     private MapFragment mMapFragment;
     private Marker dronePosition = new Marker();
+    private Marker target = new Marker();
     private NaverMap mNaverMap;
     private PolylineOverlay mPolyline = new PolylineOverlay();
     private RecyclerView mRecyclerView;
@@ -148,8 +152,8 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
     @Override
     public void onMapReady(@NonNull NaverMap naverMap) {
         this.mNaverMap = naverMap;
-        GuideMode guidemode = new GuideMode();
-        Marker target = new Marker();
+        target.setIcon(MarkerIcons.BLACK);
+        target.setIconTintColor(Color.RED);
         UiSettings uiSettings = naverMap.getUiSettings();
         uiSettings.setZoomControlEnabled(false);
         uiSettings.setScaleBarEnabled(false);
@@ -161,17 +165,16 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
         naverMap.setLocationTrackingMode(LocationTrackingMode.NoFollow);
         //dronePosition.setIcon(OverlayImage.fromResource(R.drawable.drone));
         naverMap.setOnMapLongClickListener((point, coord) ->{
-            target.setPosition(new LatLng(coord.latitude,coord.longitude));
+            mtargetposition = new LatLng(coord.latitude,coord.longitude);
+            target.setPosition(mtargetposition);
             target.setMap(naverMap);
-            addRecyclerViewText("기체가 목표 지점으로 이동합니다.");
-            if(guidemode.DialogSimple(drone,new LatLong(coord.latitude,coord.longitude),this)){
-                addRecyclerViewText("기체가 목표지점에 도착하였습니다.");
-            }
+            if(GuidedFly(new LatLong(coord.latitude,coord.longitude))){
+                addRecyclerViewText("기체가 목표지점을 향해 이동중입니다.");
+                }
             else {
                 addRecyclerViewText("기체 이동 실패");
-            }
-            target.setMap(null);
-
+                target.setMap(null);
+                }
             }
         );
     }
@@ -349,6 +352,11 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
             CameraUpdate cameraUpdate = CameraUpdate.scrollTo(new LatLng(position.getLatitude(),position.getLongitude()));
             mNaverMap.moveCamera(cameraUpdate);
         }
+        if(CheckGoal(mtargetposition)&&goal){
+            addRecyclerViewText("목표지점 도착");
+            target.setMap(null);
+            goal = false;
+        }
         //mLocationOverlay.setPosition(new LatLng(position.getLatitude(), position.getLongitude()));
     }
 
@@ -390,6 +398,28 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
     @Override
     public void onTowerDisconnected() {
         alertUser("DroneKit-Android Interrupted");
+    }
+
+    protected void updateArmButton() {
+        State vehicleState = this.drone.getAttribute(AttributeType.STATE);
+        Button armButton = (Button) findViewById(R.id.ARMBtn);
+
+        if (!this.drone.isConnected()) {
+            armButton.setVisibility(View.INVISIBLE);
+        } else {
+            armButton.setVisibility(View.VISIBLE);
+        }
+
+        if (vehicleState.isFlying()) {
+            // Land
+            armButton.setText("LAND");
+        } else if (vehicleState.isArmed()) {
+            // Take off
+            armButton.setText("TAKE OFF");
+        } else if (vehicleState.isConnected()) {
+            // Connected but not Armed
+            armButton.setText("ARM");
+        }
     }
 
     //Define Spinner
@@ -506,28 +536,6 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
                 }
             });
             myAlertBuilder.show();
-        }
-    }
-
-    protected void updateArmButton() {
-        State vehicleState = this.drone.getAttribute(AttributeType.STATE);
-        Button armButton = (Button) findViewById(R.id.ARMBtn);
-
-        if (!this.drone.isConnected()) {
-            armButton.setVisibility(View.INVISIBLE);
-        } else {
-            armButton.setVisibility(View.VISIBLE);
-        }
-
-        if (vehicleState.isFlying()) {
-            // Land
-            armButton.setText("LAND");
-        } else if (vehicleState.isArmed()) {
-            // Take off
-            armButton.setText("TAKE OFF");
-        } else if (vehicleState.isConnected()) {
-            // Connected but not Armed
-            armButton.setText("ARM");
         }
     }
 
@@ -763,8 +771,65 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
         }
     }
 
-}
+    protected Boolean GuidedFly(final LatLong point) {
+        State vehicleState = this.drone.getAttribute(AttributeType.STATE);
+        if (vehicleState.isFlying()) {
+            addRecyclerViewText("기체가 목표지점을 향해 이동합니다.");
+            goal = true;
+            State vehiclemode = drone.getAttribute(AttributeType.STATE);
+            VehicleMode dronemode = vehiclemode.getVehicleMode();
+            if(dronemode != VehicleMode.COPTER_GUIDED) {
+                AlertDialog.Builder alt_bld = new AlertDialog.Builder(this);
+                alt_bld.setMessage("확인하시면 가이드모드로 전환후 기체가 이동합니다.").setCancelable(false).setPositiveButton("확인", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int id) {
+                        // Action for 'Yes' Button
+                        VehicleApi.getApi(drone).setVehicleMode(VehicleMode.COPTER_GUIDED,
+                                new AbstractCommandListener() {
+                                    @Override
+                                    public void onSuccess() {
+                                        ControlApi.getApi(drone).goTo(point, true, null);
+                                    }
 
+                                    @Override
+                                    public void onError(int i) {
+
+                                    }
+
+                                    @Override
+                                    public void onTimeout() {
+
+                                    }
+                                });
+                    }
+                }).setNegativeButton("취소", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int id) {
+                        dialog.cancel();
+                    }
+                });
+                AlertDialog alert = alt_bld.create();
+                // Title for AlertDialog
+                alert.setTitle("가이드 비행");
+                // Icon for AlertDialog
+                //alert.setIcon(R.drawable.drone);
+                alert.show();
+            }
+            else {
+                ControlApi.getApi(drone).goTo(point, true, null);
+            }
+            return true;
+        }
+        return  false;
+    }
+
+    public boolean CheckGoal(LatLng recentLatLng) {
+        GuidedState guidedState = drone.getAttribute(AttributeType.GUIDED_STATE);
+        LatLng target = new LatLng(guidedState.getCoordinate().getLatitude(),
+                guidedState.getCoordinate().getLongitude());
+        return target.distanceTo(recentLatLng) <= 1;
+    }
+
+}
+/*
 class GuideMode {
     //static LatLng mGuidedPoint; //가이드모드 목적지 저장
     //static Marker mMarkerGuide = new com.naver.maps.map.overlay.Marker(); //GCS 위치 표시마커 옵션
@@ -774,7 +839,7 @@ class GuideMode {
         if (vehicleState.isFlying()) {
             State vehiclemode = drone.getAttribute(AttributeType.STATE);
             VehicleMode dronemode = vehiclemode.getVehicleMode();
-            if(dronemode == VehicleMode.COPTER_GUIDED) {
+            if(dronemode != VehicleMode.COPTER_GUIDED) {
                 AlertDialog.Builder alt_bld = new AlertDialog.Builder(main);
                 alt_bld.setMessage("확인하시면 가이드모드로 전환후 기체가 이동합니다.").setCancelable(false).setPositiveButton("확인", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int id) {
@@ -812,8 +877,6 @@ class GuideMode {
             else {
                 ControlApi.getApi(drone).goTo(point, true, null);
             }
-            while(CheckGoal(drone,new LatLng(point.getLatitude(),point.getLongitude())) == false){ }
-            VehicleApi.getApi(drone).setVehicleMode(VehicleMode.COPTER_LOITER);
             return true;
         }
         return  false;
@@ -826,6 +889,8 @@ class GuideMode {
         return target.distanceTo(recentLatLng) <= 1;
     }
 }
+
+ */
 
 class recyclerViewText extends RecyclerView.Adapter<recyclerViewText.ViewHolder> {
 
