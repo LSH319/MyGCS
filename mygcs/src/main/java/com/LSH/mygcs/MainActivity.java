@@ -102,6 +102,10 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 1000;
     private final Handler handler = new Handler();
 
+    Marker A = new Marker();
+    Marker B = new Marker();
+    PolylineOverlay ABLine = new PolylineOverlay();
+
     ConnectionParameter connParams;
 
     Handler mainHandler;
@@ -177,6 +181,20 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
                 }
             }
         );
+//        naverMap.setOnMapClickListener((point, coord) ->{
+//            if(MarkA) {
+//                A.setPosition(new LatLng(coord.latitude, coord.longitude));
+//                A.setMap(naverMap);
+//                A.setCaptionText("A");
+//                MarkA = false;
+//            }
+//            else {
+//                B.setPosition(new LatLng(coord.latitude, coord.longitude));
+//                B.setMap(naverMap);
+//                B.setCaptionText("B");
+//                MarkA = true;
+//            }
+//        });
     }
 
     @Override
@@ -344,18 +362,35 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
         dronePosition.setMap(null);
         Gps gps = this.drone.getAttribute(AttributeType.GPS);
         LatLong position = new LatLong(gps.getPosition());
-        dronePosition.setPosition(new LatLng(position.getLatitude(),position.getLongitude()));
-        mLocationCollection.add(new LatLng(position.getLatitude(),position.getLongitude()));
+        LatLng droneposition = new LatLng(position.getLatitude(),position.getLongitude());
+        dronePosition.setPosition(droneposition);
+        mLocationCollection.add(droneposition);
         if(mLocationCollection.size() > 2) drawPolyLine();
         dronePosition.setMap(mNaverMap);
         if(mCameraFix == true){
-            CameraUpdate cameraUpdate = CameraUpdate.scrollTo(new LatLng(position.getLatitude(),position.getLongitude()));
+            CameraUpdate cameraUpdate = CameraUpdate.scrollTo(droneposition);
             mNaverMap.moveCamera(cameraUpdate);
         }
-        if(CheckGoal(mtargetposition)&&goal){
+        if(CheckGoal(droneposition)&&goal){
             addRecyclerViewText("목표지점 도착");
             target.setMap(null);
             goal = false;
+            VehicleApi.getApi(drone).setVehicleMode(VehicleMode.COPTER_LOITER,
+                    new AbstractCommandListener() {
+                        @Override
+                        public void onSuccess() {
+                        }
+
+                        @Override
+                        public void onError(int i) {
+
+                        }
+
+                        @Override
+                        public void onTimeout() {
+
+                        }
+                    });
         }
         //mLocationOverlay.setPosition(new LatLng(position.getLatitude(), position.getLongitude()));
     }
@@ -540,18 +575,34 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
     }
 
     public void tapConnectBTN(View view) {
+        AlertDialog.Builder myAlertBuilder =
+                new AlertDialog.Builder(MainActivity.this);
         if (this.drone.isConnected()) {
             this.drone.disconnect();
         } else {
+            myAlertBuilder.setTitle("드론 연결");
+            myAlertBuilder.setMessage("어느 방식으로 연결하시겠습니까");
+            myAlertBuilder.setPositiveButton("UDP",new DialogInterface.OnClickListener(){
+                public void onClick(DialogInterface dialog, int which){
+                    ConnectionParameter connectionParams
+                            = ConnectionParameter.newUdpConnection(null);
+                    drone.connect(connectionParams);
+                }
+            });
+            myAlertBuilder.setNegativeButton("Bluetooth", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    drone.connect(connParams);
+                }
+            });
+            myAlertBuilder.show();
+        }
             /*
             ConnectionParameter connectionParams
                     = ConnectionParameter.newUdpConnection(null);
             this.drone.connect(connectionParams);
-
-             */
             this.drone.connect(connParams);
-        }
-
+            */
     }
 
     public void tapABBTN(View view){
@@ -706,6 +757,12 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
         mTextInRecycleerView.clear();
         recyclerViewText adapter = new recyclerViewText(mTextInRecycleerView) ;
         mRecyclerView.setAdapter(adapter) ;
+        ControlApi.getApi(drone).pauseAtCurrentLocation(null);
+        A.setMap(null);
+        B.setMap(null);
+        ABLine.setMap(null);
+        Button ABBtn = (Button) findViewById(R.id.ABBtn);
+        ABBtn.setText("A지점");
     }
 
     public void tapTestBTN(View view){
@@ -828,6 +885,148 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
         return target.distanceTo(recentLatLng) <= 1;
     }
 
+    //offset(a*sin(x),b*cos(x))
+/*
+public double getAngle(PointF start, PointF end) {
+    double dy = end.y-start.y;
+    double dx = end.x-start.x;
+    double angle = Math.atan(dy/dx) * (180.0/Math.PI);
+    if(dx < 0.0) {
+        angle += 180.0;
+    } else {
+        if(dy<0.0) angle += 360.0;
+    }
+    return angle;
+}
+ */
+
+    public void DrawAB(View view){
+        Button ABBtn = (Button) findViewById(R.id.ABBtn);
+        if(ABBtn.getText().equals("A지점")){
+            mNaverMap.setOnMapClickListener((point, coord) ->{
+                A.setPosition(new LatLng(coord.latitude, coord.longitude));
+                A.setMap(mNaverMap);
+                A.setCaptionText("A");
+            });
+            ABBtn.setText("B지점");
+        }
+        if(ABBtn.getText().equals("B지점")){
+            mNaverMap.setOnMapClickListener((point, coord) ->{
+                B.setPosition(new LatLng(coord.latitude, coord.longitude));
+                B.setMap(mNaverMap);
+                B.setCaptionText("A");
+            });
+            ABBtn.setText("B지점");
+        }
+        double angle = getAngle(B.getPosition(),A.getPosition());
+        double distance = A.getPosition().distanceTo(B.getPosition());
+        ArrayList<LatLng> po = new ArrayList<LatLng>();
+        LatLng ne1 = A.getPosition();
+        LatLng ne2 = B.getPosition();
+        po.add(A.getPosition());
+        po.add(B.getPosition());
+        int repeat = 0;
+        while(mFlightwidth * repeat < mABdistance * 2){
+            if(repeat == 0){
+                ne1 = B.getPosition().offset(mFlightwidth*Math.sin(Math.toRadians(angle+90)),mFlightwidth*Math.cos(Math.toRadians(angle+90)));
+                po.add(ne1);
+            }
+            else if(repeat % 2 == 0){
+                ne1 = ne2.offset(mFlightwidth*Math.sin(Math.toRadians(angle+90)),mFlightwidth*Math.cos(Math.toRadians(angle+90)));
+                po.add(ne1);
+            }
+            else if (repeat % 4 == 1){
+                ne2 = ne1.offset(distance*Math.sin(Math.toRadians(angle)),distance*Math.cos(Math.toRadians(angle)));
+                po.add(ne2);
+            }
+            else if (repeat % 4 == 3){
+                ne2 = ne1.offset(distance*Math.sin(Math.toRadians(angle-180)),distance*Math.cos(Math.toRadians(angle-180)));
+                po.add(ne2);
+            }
+            repeat++;
+        }
+
+        ABLine.setCoords(po);
+        ABLine.setMap(mNaverMap);
+    }
+
+    public double getAngle(LatLng from, LatLng to) {
+//        double dy = end.longitude-start.longitude;
+//        double dx = end.latitude-start.latitude;
+//        double angle = Math.atan(dy/dx) * (180.0/Math.PI);
+//        if(dx < 0.0) {
+//            angle += 180.0;
+//        } else {
+//            if(dy<0.0) angle += 360.0;
+//        }
+//        return angle+90;
+
+        double dy = to.latitude - from.latitude;
+        double dx = to.longitude - from.longitude;
+        double result = Math.toDegrees(Math.atan2(dy,dx));
+        return (result < 0) ? (360d + result) : result;
+
+        /*
+        double latitudeArc = Math.toRadians(from.latitude - to.latitude);
+        double longitudeArc = Math.toRadians(from.longitude - to.longitude);
+        double latitudeH = Math.sin(latitudeArc * 0.5);
+        latitudeH *= latitudeH;
+        double lontitudeH = Math.sin(longitudeArc * 0.5);
+        lontitudeH *= lontitudeH;
+
+        double tmp = Math.cos(Math.toRadians(from.latitude))
+                * Math.cos(Math.toRadians(to.latitude));
+        return Math.toDegrees(2.0 * Math.asin(Math.sqrt(latitudeH + tmp * lontitudeH)));
+
+         */
+    }
+}
+
+class recyclerViewText extends RecyclerView.Adapter<recyclerViewText.ViewHolder> {
+
+    private ArrayList<String> mData = null ;
+
+    // 아이템 뷰를 저장하는 뷰홀더 클래스.
+    public class ViewHolder extends RecyclerView.ViewHolder {
+        TextView textView1 ;
+
+        ViewHolder(View itemView) {
+            super(itemView) ;
+
+            // 뷰 객체에 대한 참조. (hold strong reference)
+            textView1 = itemView.findViewById(R.id.text) ;
+        }
+    }
+
+    // 생성자에서 데이터 리스트 객체를 전달받음.
+    recyclerViewText(ArrayList<String> list) {
+        mData = list ;
+    }
+
+    // onCreateViewHolder() - 아이템 뷰를 위한 뷰홀더 객체 생성하여 리턴.
+    @Override
+    public recyclerViewText.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+        Context context = parent.getContext() ;
+        LayoutInflater inflater = (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) ;
+
+        View view = inflater.inflate(R.layout.item_recycler, parent, false) ;
+        recyclerViewText.ViewHolder vh = new recyclerViewText.ViewHolder(view) ;
+
+        return vh ;
+    }
+
+    // onBindViewHolder() - position에 해당하는 데이터를 뷰홀더의 아이템뷰에 표시.
+    @Override
+    public void onBindViewHolder(recyclerViewText.ViewHolder holder, int position) {
+        String text = mData.get(position) ;
+        holder.textView1.setText(text) ;
+    }
+
+    // getItemCount() - 전체 데이터 갯수 리턴.
+    @Override
+    public int getItemCount() {
+        return mData.size() ;
+    }
 }
 /*
 class GuideMode {
@@ -891,50 +1090,3 @@ class GuideMode {
 }
 
  */
-
-class recyclerViewText extends RecyclerView.Adapter<recyclerViewText.ViewHolder> {
-
-    private ArrayList<String> mData = null ;
-
-    // 아이템 뷰를 저장하는 뷰홀더 클래스.
-    public class ViewHolder extends RecyclerView.ViewHolder {
-        TextView textView1 ;
-
-        ViewHolder(View itemView) {
-            super(itemView) ;
-
-            // 뷰 객체에 대한 참조. (hold strong reference)
-            textView1 = itemView.findViewById(R.id.text) ;
-        }
-    }
-
-    // 생성자에서 데이터 리스트 객체를 전달받음.
-    recyclerViewText(ArrayList<String> list) {
-        mData = list ;
-    }
-
-    // onCreateViewHolder() - 아이템 뷰를 위한 뷰홀더 객체 생성하여 리턴.
-    @Override
-    public recyclerViewText.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-        Context context = parent.getContext() ;
-        LayoutInflater inflater = (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) ;
-
-        View view = inflater.inflate(R.layout.item_recycler, parent, false) ;
-        recyclerViewText.ViewHolder vh = new recyclerViewText.ViewHolder(view) ;
-
-        return vh ;
-    }
-
-    // onBindViewHolder() - position에 해당하는 데이터를 뷰홀더의 아이템뷰에 표시.
-    @Override
-    public void onBindViewHolder(recyclerViewText.ViewHolder holder, int position) {
-        String text = mData.get(position) ;
-        holder.textView1.setText(text) ;
-    }
-
-    // getItemCount() - 전체 데이터 갯수 리턴.
-    @Override
-    public int getItemCount() {
-        return mData.size() ;
-    }
-}

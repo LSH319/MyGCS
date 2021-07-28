@@ -6,14 +6,14 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
+
     <fragment
         android:id="@+id/map"
         android:name="com.naver.maps.map.MapFragment"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        tools:layout_editor_absoluteX="-206dp"
-        tools:layout_editor_absoluteY="16dp" />
-    0
+        tools:layout_editor_absoluteX="-111dp"
+        tools:layout_editor_absoluteY="0dp" />
 
     <Button
         android:id="@+id/connectBtn"
@@ -466,8 +466,18 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:onClick="tapTestBTN"
-        android:text="Test"
+        android:text="Bluetooth"
+        android:textSize="10dp"
         app:layout_constraintBottom_toTopOf="@+id/clearBtn"
         app:layout_constraintEnd_toEndOf="parent" />
+
+    <Button
+        android:id="@+id/ABBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:onClick="DrawAB"
+        android:text="A지점"
+        app:layout_constraintBottom_toTopOf="@+id/ARMBtn"
+        app:layout_constraintStart_toStartOf="parent" />
 
 </android.support.constraint.ConstraintLayout>
