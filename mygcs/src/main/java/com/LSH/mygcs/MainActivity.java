@@ -28,9 +28,8 @@ import android.widget.Toast;
 import com.LSH.mygcs.activites.helpers.BluetoothDevicesActivity;
 import com.LSH.mygcs.utils.TLogUtils;
 import com.LSH.mygcs.utils.prefs.DroidPlannerPrefs;
-import com.MAVLink.ardupilotmega.CRC;
-import com.MAVLink.enums.MAV_AUTOPILOT;
 import com.MAVLink.enums.MAV_CMD;
+import com.MAVLink.enums.MAV_CMD_ACK;
 import com.naver.maps.geometry.LatLng;
 import com.naver.maps.map.CameraUpdate;
 import com.naver.maps.map.LocationTrackingMode;
@@ -50,12 +49,15 @@ import com.o3dr.android.client.interfaces.DroneListener;
 import com.o3dr.android.client.interfaces.LinkListener;
 import com.o3dr.android.client.interfaces.TowerListener;
 import com.o3dr.services.android.lib.coordinate.LatLong;
+import com.o3dr.services.android.lib.coordinate.LatLongAlt;
 import com.o3dr.services.android.lib.drone.attribute.AttributeEvent;
 import com.o3dr.services.android.lib.drone.attribute.AttributeType;
 import com.o3dr.services.android.lib.drone.companion.solo.SoloAttributes;
 import com.o3dr.services.android.lib.drone.companion.solo.SoloState;
 import com.o3dr.services.android.lib.drone.connection.ConnectionParameter;
 import com.o3dr.services.android.lib.drone.connection.ConnectionType;
+import com.o3dr.services.android.lib.drone.mission.Mission;
+import com.o3dr.services.android.lib.drone.mission.item.MissionItem;
 import com.o3dr.services.android.lib.drone.mission.item.spatial.Waypoint;
 import com.o3dr.services.android.lib.drone.property.Altitude;
 import com.o3dr.services.android.lib.drone.property.Attitude;
@@ -70,7 +72,10 @@ import com.o3dr.services.android.lib.gcs.link.LinkConnectionStatus;
 import com.o3dr.services.android.lib.model.AbstractCommandListener;
 import com.o3dr.services.android.lib.model.SimpleCommandListener;
 
-import org.droidplanner.services.android.impl.core.MAVLink.MavLinkMsgHandler;
+import org.droidplanner.services.android.impl.core.MAVLink.MavLinkWaypoint;
+import org.droidplanner.services.android.impl.core.MAVLink.WaypointManager;
+import org.droidplanner.services.android.impl.core.mission.MissionItemType;
+import org.droidplanner.services.android.impl.core.mission.waypoints.WaypointImpl;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -86,7 +91,7 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
     private FusedLocationSource mLocationSource;
     private LatLng mtargetposition;
     private MapFragment mMapFragment;
-    private Marker dronePosition = new Marker();
+    private Marker dronePositionMarker = new Marker();
     private Marker target = new Marker();
     private NaverMap mNaverMap;
     private PolylineOverlay mPolyline = new PolylineOverlay();
@@ -105,6 +110,7 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
     Marker A = new Marker();
     Marker B = new Marker();
     PolylineOverlay ABLine = new PolylineOverlay();
+    LatLng droneposition;
 
     ConnectionParameter connParams;
 
@@ -167,7 +173,7 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
         //mLocationOverlay.setIcon(OverlayImage.fromResource(R.drawable.location_overlay_icon));
         naverMap.setLocationSource(mLocationSource);
         naverMap.setLocationTrackingMode(LocationTrackingMode.NoFollow);
-        //dronePosition.setIcon(OverlayImage.fromResource(R.drawable.drone));
+        //dronePositionMarker.setIcon(OverlayImage.fromResource(R.drawable.drone));
         naverMap.setOnMapLongClickListener((point, coord) ->{
             mtargetposition = new LatLng(coord.latitude,coord.longitude);
             target.setPosition(mtargetposition);
@@ -354,19 +360,19 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
             if(yaw_360 == 360) yaw_360 = 0;
         }
         viewYaw.setText(String.format("%d", (int) yaw_360 ) + "deg");
-        dronePosition.setAngle(yaw_360);
+        dronePositionMarker.setAngle(yaw_360);
         //mLocationOverlay.setBearing(yaw_360);
     }
 
     protected void updateGps(){
-        dronePosition.setMap(null);
+        dronePositionMarker.setMap(null);
         Gps gps = this.drone.getAttribute(AttributeType.GPS);
         LatLong position = new LatLong(gps.getPosition());
-        LatLng droneposition = new LatLng(position.getLatitude(),position.getLongitude());
-        dronePosition.setPosition(droneposition);
+        droneposition = new LatLng(position.getLatitude(),position.getLongitude());
+        dronePositionMarker.setPosition(droneposition);
         mLocationCollection.add(droneposition);
         if(mLocationCollection.size() > 2) drawPolyLine();
-        dronePosition.setMap(mNaverMap);
+        dronePositionMarker.setMap(mNaverMap);
         if(mCameraFix == true){
             CameraUpdate cameraUpdate = CameraUpdate.scrollTo(droneposition);
             mNaverMap.moveCamera(cameraUpdate);
@@ -757,6 +763,7 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
         mTextInRecycleerView.clear();
         recyclerViewText adapter = new recyclerViewText(mTextInRecycleerView) ;
         mRecyclerView.setAdapter(adapter) ;
+        target.setMap(null);
         ControlApi.getApi(drone).pauseAtCurrentLocation(null);
         A.setMap(null);
         B.setMap(null);
@@ -902,52 +909,54 @@ public double getAngle(PointF start, PointF end) {
 
     public void DrawAB(View view){
         Button ABBtn = (Button) findViewById(R.id.ABBtn);
-        if(ABBtn.getText().equals("A지점")){
-            mNaverMap.setOnMapClickListener((point, coord) ->{
-                A.setPosition(new LatLng(coord.latitude, coord.longitude));
-                A.setMap(mNaverMap);
-                A.setCaptionText("A");
-            });
-            ABBtn.setText("B지점");
-        }
-        if(ABBtn.getText().equals("B지점")){
-            mNaverMap.setOnMapClickListener((point, coord) ->{
-                B.setPosition(new LatLng(coord.latitude, coord.longitude));
-                B.setMap(mNaverMap);
-                B.setCaptionText("A");
-            });
-            ABBtn.setText("B지점");
-        }
         double angle = getAngle(B.getPosition(),A.getPosition());
         double distance = A.getPosition().distanceTo(B.getPosition());
         ArrayList<LatLng> po = new ArrayList<LatLng>();
-        LatLng ne1 = A.getPosition();
-        LatLng ne2 = B.getPosition();
-        po.add(A.getPosition());
-        po.add(B.getPosition());
-        int repeat = 0;
-        while(mFlightwidth * repeat < mABdistance * 2){
-            if(repeat == 0){
-                ne1 = B.getPosition().offset(mFlightwidth*Math.sin(Math.toRadians(angle+90)),mFlightwidth*Math.cos(Math.toRadians(angle+90)));
-                po.add(ne1);
-            }
-            else if(repeat % 2 == 0){
-                ne1 = ne2.offset(mFlightwidth*Math.sin(Math.toRadians(angle+90)),mFlightwidth*Math.cos(Math.toRadians(angle+90)));
-                po.add(ne1);
-            }
-            else if (repeat % 4 == 1){
-                ne2 = ne1.offset(distance*Math.sin(Math.toRadians(angle)),distance*Math.cos(Math.toRadians(angle)));
-                po.add(ne2);
-            }
-            else if (repeat % 4 == 3){
-                ne2 = ne1.offset(distance*Math.sin(Math.toRadians(angle-180)),distance*Math.cos(Math.toRadians(angle-180)));
-                po.add(ne2);
-            }
-            repeat++;
-        }
 
-        ABLine.setCoords(po);
-        ABLine.setMap(mNaverMap);
+        if(ABBtn.getText().equals("A지점")){
+            A.setPosition(droneposition);
+            A.setMap(mNaverMap);
+            A.setCaptionText("A");
+            ABBtn.setText("B지점");
+
+        }
+        else if(ABBtn.getText().equals("B지점")){
+            B.setPosition(droneposition);
+            B.setMap(mNaverMap);
+            B.setCaptionText("B");
+            ABBtn.setText("경로 생성");
+        }
+        else if(ABBtn.getText().equals("경로 생성")) {
+            LatLng ne1 = A.getPosition();
+            LatLng ne2 = B.getPosition();
+            po.add(A.getPosition());
+            po.add(B.getPosition());
+            int repeat = 0;
+            while(mFlightwidth * repeat < mABdistance * 2){
+                if(repeat == 0){
+                    ne1 = B.getPosition().offset(mFlightwidth*Math.sin(Math.toRadians(angle+90)),mFlightwidth*Math.cos(Math.toRadians(angle+90)));
+                    po.add(ne1);
+                }
+                else if(repeat % 2 == 0){
+                    ne1 = ne2.offset(mFlightwidth*Math.sin(Math.toRadians(angle+90)),mFlightwidth*Math.cos(Math.toRadians(angle+90)));
+                    po.add(ne1);
+                }
+                else if (repeat % 4 == 1){
+                    ne2 = ne1.offset(distance*Math.sin(Math.toRadians(angle)),distance*Math.cos(Math.toRadians(angle)));
+                    po.add(ne2);
+                }
+                else if (repeat % 4 == 3){
+                    ne2 = ne1.offset(distance*Math.sin(Math.toRadians(angle-180)),distance*Math.cos(Math.toRadians(angle-180)));
+                    po.add(ne2);
+                }
+                repeat++;
+            }
+            ABLine.setCoords(po);
+            ABLine.setMap(mNaverMap);
+        }
+        else{
+            
+        }
     }
 
     public double getAngle(LatLng from, LatLng to) {
