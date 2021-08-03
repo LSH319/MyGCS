@@ -29,7 +29,7 @@ import com.LSH.mygcs.activites.helpers.BluetoothDevicesActivity;
 import com.LSH.mygcs.utils.TLogUtils;
 import com.LSH.mygcs.utils.prefs.DroidPlannerPrefs;
 import com.MAVLink.enums.MAV_CMD;
-import com.MAVLink.enums.MAV_CMD_ACK;
+import com.MAVLink.enums.MAV_FRAME;
 import com.naver.maps.geometry.LatLng;
 import com.naver.maps.map.CameraUpdate;
 import com.naver.maps.map.LocationTrackingMode;
@@ -44,6 +44,7 @@ import com.naver.maps.map.util.MarkerIcons;
 import com.o3dr.android.client.ControlTower;
 import com.o3dr.android.client.Drone;
 import com.o3dr.android.client.apis.ControlApi;
+import com.o3dr.android.client.apis.MissionApi;
 import com.o3dr.android.client.apis.VehicleApi;
 import com.o3dr.android.client.interfaces.DroneListener;
 import com.o3dr.android.client.interfaces.LinkListener;
@@ -57,6 +58,7 @@ import com.o3dr.services.android.lib.drone.companion.solo.SoloState;
 import com.o3dr.services.android.lib.drone.connection.ConnectionParameter;
 import com.o3dr.services.android.lib.drone.connection.ConnectionType;
 import com.o3dr.services.android.lib.drone.mission.Mission;
+import com.o3dr.services.android.lib.drone.mission.MissionItemType;
 import com.o3dr.services.android.lib.drone.mission.item.MissionItem;
 import com.o3dr.services.android.lib.drone.mission.item.spatial.Waypoint;
 import com.o3dr.services.android.lib.drone.property.Altitude;
@@ -71,14 +73,15 @@ import com.o3dr.services.android.lib.drone.property.VehicleMode;
 import com.o3dr.services.android.lib.gcs.link.LinkConnectionStatus;
 import com.o3dr.services.android.lib.model.AbstractCommandListener;
 import com.o3dr.services.android.lib.model.SimpleCommandListener;
+import com.o3dr.services.android.lib.model.action.Action;
 
-import org.droidplanner.services.android.impl.core.MAVLink.MavLinkWaypoint;
 import org.droidplanner.services.android.impl.core.MAVLink.WaypointManager;
-import org.droidplanner.services.android.impl.core.mission.MissionItemType;
-import org.droidplanner.services.android.impl.core.mission.waypoints.WaypointImpl;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static com.o3dr.services.android.lib.drone.action.ControlActions.ACTION_DO_GUIDED_TAKEOFF;
+import static java.lang.Thread.sleep;
 
 public class MainActivity extends AppCompatActivity implements DroneListener, TowerListener, LinkListener, OnMapReadyCallback {
 
@@ -111,6 +114,7 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
     Marker B = new Marker();
     PolylineOverlay ABLine = new PolylineOverlay();
     LatLng droneposition;
+    ArrayList<LatLng> po = new ArrayList<LatLng>();
 
     ConnectionParameter connParams;
 
@@ -154,9 +158,7 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
 
         // 리사이클러뷰에 LinearLayoutManager 객체 지정.
         mRecyclerView = findViewById(R.id.stateText);
-        mRecyclerView.setLayoutManager(new LinearLayoutManager(this)) ;
-
-
+        mRecyclerView.setLayoutManager(new LinearLayoutManager(this));
     }
 
     @Override
@@ -740,19 +742,19 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
     }
 
     public void tapSetCameraViewBTN(View view){
-        doBtnVisible("cameraMove","mCameraFix");
+        doBtnVisible("cameraMove","cameraFix");
     }
 
     public void tapSetCameraMoveBTN(View view){
         mCameraFix = false;
-        doBtnInvisible("cameraMove","mCameraFix");
+        doBtnInvisible("cameraMove","cameraFix");
         Button cameraView = (Button) findViewById(R.id.cameraView);
         cameraView.setText("맵 이동");
     }
 
     public void tapSetCameraFixBTN(View view){
         mCameraFix = true;
-        doBtnInvisible("cameraMove","mCameraFix");
+        doBtnInvisible("cameraMove","cameraFix");
         Button cameraView = (Button) findViewById(R.id.cameraView);
         cameraView.setText("맵 잠금");
     }
@@ -911,20 +913,36 @@ public double getAngle(PointF start, PointF end) {
         Button ABBtn = (Button) findViewById(R.id.ABBtn);
         double angle = getAngle(B.getPosition(),A.getPosition());
         double distance = A.getPosition().distanceTo(B.getPosition());
-        ArrayList<LatLng> po = new ArrayList<LatLng>();
+
 
         if(ABBtn.getText().equals("A지점")){
             A.setPosition(droneposition);
             A.setMap(mNaverMap);
             A.setCaptionText("A");
             ABBtn.setText("B지점");
-
+             /*
+            mNaverMap.setOnMapClickListener((point, coord) -> {
+                A.setPosition(new LatLng(coord.latitude, coord.longitude));
+                A.setMap(mNaverMap);
+                A.setCaptionText("A");
+                ABBtn.setText("B지점");
+            });
+             */
         }
         else if(ABBtn.getText().equals("B지점")){
             B.setPosition(droneposition);
             B.setMap(mNaverMap);
             B.setCaptionText("B");
             ABBtn.setText("경로 생성");
+            /*
+            mNaverMap.setOnMapClickListener((point, coord) -> {
+                B.setPosition(new LatLng(coord.latitude, coord.longitude));
+                B.setMap(mNaverMap);
+                B.setCaptionText("B");
+                ABBtn.setText("경로 생성");
+            });
+
+             */
         }
         else if(ABBtn.getText().equals("경로 생성")) {
             LatLng ne1 = A.getPosition();
@@ -953,12 +971,30 @@ public double getAngle(PointF start, PointF end) {
             }
             ABLine.setCoords(po);
             ABLine.setMap(mNaverMap);
+            ABBtn.setText("비행");
         }
         else{
-            
+            Mission mission = new Mission();
+            Waypoint waypoint = new Waypoint();
+            waypoint.setDelay(1);
+            for(int i = 2 ; i < po.size();i++) {
+                waypoint.setCoordinate(new LatLongAlt(po.get(i).latitude,po.get(i).longitude,mAltitude));
+                mission.addMissionItem(i-2,waypoint);
+            }
+            MissionApi.getApi(drone).setMission(mission,true);
+            MissionApi.getApi(drone).startMission(true,true,null);
         }
     }
-
+/*
+    public void test() {
+        Mission mission = new Mission();
+        Waypoint waypoint = new Waypoint();
+        waypoint.setCoordinate(new LatLongAlt());
+        mission.addMissionItem(waypoint);
+        mission.
+        //MissionApi missionApi = new MissionApi(drone);
+    }
+*/
     public double getAngle(LatLng from, LatLng to) {
 //        double dy = end.longitude-start.longitude;
 //        double dx = end.latitude-start.latitude;
@@ -1037,6 +1073,7 @@ class recyclerViewText extends RecyclerView.Adapter<recyclerViewText.ViewHolder>
         return mData.size() ;
     }
 }
+
 /*
 class GuideMode {
     //static LatLng mGuidedPoint; //가이드모드 목적지 저장
