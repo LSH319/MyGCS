@@ -77,6 +77,7 @@ import com.o3dr.services.android.lib.model.action.Action;
 
 import org.droidplanner.services.android.impl.core.MAVLink.WaypointManager;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -271,6 +272,11 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
                 updateArmButton();
                 break;
 
+            case AttributeEvent.MISSION_SENT:
+                addRecyclerViewText("미션 보내기 완료");
+                MissionApi.getApi(drone).startMission(true,true,null);
+                break;
+
             case AttributeEvent.TYPE_UPDATED:
                 Type newDroneType = this.drone.getAttribute(AttributeType.TYPE);
                 if (newDroneType.getDroneType() != this.droneType) {
@@ -309,7 +315,7 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
             case AttributeEvent.GPS_POSITION:
                 updateGps();
 
-            default:
+                default:
                 // Log.i("DRONE_EVENT", event); //Uncomment to see events from the drone
                 break;
         }
@@ -798,7 +804,7 @@ public class MainActivity extends AppCompatActivity implements DroneListener, To
                 connParams = ConnectionParameter.newBluetoothConnection(btAddress,
                         tlogLoggingUri, EVENTS_DISPATCHING_PERIOD);
             }
-
+        addRecyclerViewText("블루투스 연결기체 확인 완료");
         }
     
 
@@ -920,29 +926,26 @@ public double getAngle(PointF start, PointF end) {
             A.setMap(mNaverMap);
             A.setCaptionText("A");
             ABBtn.setText("B지점");
-             /*
-            mNaverMap.setOnMapClickListener((point, coord) -> {
-                A.setPosition(new LatLng(coord.latitude, coord.longitude));
-                A.setMap(mNaverMap);
-                A.setCaptionText("A");
-                ABBtn.setText("B지점");
-            });
-             */
+
+//            mNaverMap.setOnMapClickListener((point, coord) -> {
+//                A.setPosition(new LatLng(coord.latitude, coord.longitude));
+//                A.setMap(mNaverMap);
+//                A.setCaptionText("A");
+//                ABBtn.setText("B지점");
+//            });
         }
         else if(ABBtn.getText().equals("B지점")){
             B.setPosition(droneposition);
             B.setMap(mNaverMap);
             B.setCaptionText("B");
             ABBtn.setText("경로 생성");
-            /*
-            mNaverMap.setOnMapClickListener((point, coord) -> {
-                B.setPosition(new LatLng(coord.latitude, coord.longitude));
-                B.setMap(mNaverMap);
-                B.setCaptionText("B");
-                ABBtn.setText("경로 생성");
-            });
 
-             */
+//            mNaverMap.setOnMapClickListener((point, coord) -> {
+//                B.setPosition(new LatLng(coord.latitude, coord.longitude));
+//                B.setMap(mNaverMap);
+//                B.setCaptionText("B");
+//                ABBtn.setText("경로 생성");
+//            });
         }
         else if(ABBtn.getText().equals("경로 생성")) {
             LatLng ne1 = A.getPosition();
@@ -975,14 +978,14 @@ public double getAngle(PointF start, PointF end) {
         }
         else{
             Mission mission = new Mission();
-            Waypoint waypoint = new Waypoint();
-            waypoint.setDelay(1);
+            ArrayList<Waypoint> waypointlist= new ArrayList<Waypoint>();
             for(int i = 2 ; i < po.size();i++) {
-                waypoint.setCoordinate(new LatLongAlt(po.get(i).latitude,po.get(i).longitude,mAltitude));
-                mission.addMissionItem(i-2,waypoint);
+                waypointlist.add(new Waypoint());
+                waypointlist.get(i-2).setCoordinate(new LatLongAlt(po.get(i).latitude,po.get(i).longitude,mAltitude));
+                waypointlist.get(i-2).setDelay(1);
+                mission.addMissionItem(i-2,waypointlist.get(i-2));
             }
             MissionApi.getApi(drone).setMission(mission,true);
-            MissionApi.getApi(drone).startMission(true,true,null);
         }
     }
 /*

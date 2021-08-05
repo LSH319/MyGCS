@@ -44,8 +44,8 @@
 
     <android.support.v7.widget.RecyclerView
         android:id="@+id/stateText"
-        android:layout_width="130dp"
-        android:layout_height="150dp"
+        android:layout_width="190dp"
+        android:layout_height="144dp"
         app:layout_constraintStart_toStartOf="@+id/map"
         app:layout_constraintTop_toBottomOf="@+id/DroneState" />
 
